@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "223216256838",
+    "project_id": "eu-mart-mobile",
+    "storage_bucket": "eu-mart-mobile.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:223216256838:android:a54bbde01e394fa6e20747",
+        "android_client_info": {
+          "package_name": "com.example.eu_mart_mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDKL29QcdnXrloJqAhocIKYoHmWUxMCX7E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
