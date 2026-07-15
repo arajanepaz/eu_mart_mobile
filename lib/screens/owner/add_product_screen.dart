@@ -125,7 +125,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
             const SizedBox(height: 20),
 
             DropdownButtonFormField<String>(
-              value: selectedCategory,
+              initialValue: selectedCategory,
               decoration: const InputDecoration(
                 labelText: "Category",
                 border: OutlineInputBorder(),

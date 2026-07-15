@@ -1,9 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/cart_item.dart';
 
 class TransactionService {
   final FirebaseFirestore firestore = FirebaseFirestore.instance;
+  final FirebaseAuth auth = FirebaseAuth.instance;
 
   Future<void> saveTransaction({
     required List<CartItem> cart,
@@ -11,40 +13,53 @@ class TransactionService {
     required double cash,
     required double change,
   }) async {
-    final batch = firestore.batch();
+    final currentUser = auth.currentUser;
 
-    final transactionRef = firestore.collection("transactions").doc();
+    if (currentUser == null) {
+      throw Exception('No logged-in user.');
+    }
+
+    final batch = firestore.batch();
+    final transactionRef = firestore.collection('transactions').doc();
 
     final List<Map<String, dynamic>> items = [];
 
     for (final item in cart) {
       items.add({
-        "productId": item.id,
-        "productName": item.productName,
-        "price": item.price,
-        "quantity": item.quantity,
-        "subtotal": item.subtotal,
+        'productId': item.id,
+        'productName': item.productName,
+        'price': item.price,
+        'quantity': item.quantity,
+        'subtotal': item.subtotal,
       });
 
-      final productRef = firestore.collection("products").doc(item.id);
+      final productRef = firestore.collection('products').doc(item.id);
+      final productSnapshot = await productRef.get();
 
-      final product = await productRef.get();
+      if (!productSnapshot.exists) {
+        throw Exception('${item.productName} no longer exists.');
+      }
 
-      final currentStock = product["stock"] as int;
+      final productData = productSnapshot.data()!;
+      final currentStock = (productData['stock'] as num?)?.toInt() ?? 0;
 
-      batch.update(productRef, {"stock": currentStock - item.quantity});
+      if (currentStock < item.quantity) {
+        throw Exception('Not enough stock for ${item.productName}.');
+      }
+
+      batch.update(productRef, {'stock': currentStock - item.quantity});
     }
 
     batch.set(transactionRef, {
-      "total": total,
+      'total': total,
+      'cash': cash,
+      'change': change,
+      'createdAt': FieldValue.serverTimestamp(),
+      'items': items,
 
-      "cash": cash,
-
-      "change": change,
-
-      "createdAt": Timestamp.now(),
-
-      "items": items,
+      // User who processed the transaction
+      'processedById': currentUser.uid,
+      'processedByEmail': currentUser.email ?? '',
     });
 
     await batch.commit();
