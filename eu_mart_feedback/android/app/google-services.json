@@ -1,0 +1,82 @@
+{
+  "project_info": {
+    "project_number": "223216256838",
+    "project_id": "eu-mart-mobile",
+    "storage_bucket": "eu-mart-mobile.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:223216256838:android:a9ce4342b78dd437e20747",
+        "android_client_info": {
+          "package_name": "com.example.eu_mart_feedback"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "223216256838-bkphrflduar4upmfdangila44f0tuvd9.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDKL29QcdnXrloJqAhocIKYoHmWUxMCX7E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "223216256838-bkphrflduar4upmfdangila44f0tuvd9.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "223216256838-mj9kdmeh7fstnmmcrqdkg5g3odkjclu9.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.euMartMobile"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:223216256838:android:a54bbde01e394fa6e20747",
+        "android_client_info": {
+          "package_name": "com.example.eu_mart_mobile"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "223216256838-bkphrflduar4upmfdangila44f0tuvd9.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDKL29QcdnXrloJqAhocIKYoHmWUxMCX7E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "223216256838-bkphrflduar4upmfdangila44f0tuvd9.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "223216256838-mj9kdmeh7fstnmmcrqdkg5g3odkjclu9.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.euMartMobile"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

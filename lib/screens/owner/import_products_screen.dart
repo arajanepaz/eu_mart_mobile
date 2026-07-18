@@ -29,6 +29,7 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
     'sellingPrice',
     'stock',
     'supplier',
+    'expirationDate',
   ];
 
   Future<void> chooseCsvFile() async {
@@ -50,7 +51,6 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
 
       String csvText = utf8.decode(bytes, allowMalformed: true);
 
-      // Remove UTF-8 BOM added by Excel.
       csvText = csvText.replaceFirst('\uFEFF', '');
 
       final rows = csv.decode(csvText);
@@ -84,13 +84,49 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
           backgroundColor: Colors.green,
         ),
       );
-    } catch (e) {
+    } catch (error) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('CSV error: $e'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('CSV error: $error'),
+          backgroundColor: Colors.red,
+        ),
       );
     }
+  }
+
+  DateTime? parseExpirationDate(String value) {
+    final String cleanedValue = value.trim();
+
+    if (cleanedValue.isEmpty) {
+      return null;
+    }
+
+    final DateTime? isoDate = DateTime.tryParse(cleanedValue);
+
+    if (isoDate != null) {
+      return DateTime(isoDate.year, isoDate.month, isoDate.day);
+    }
+
+    final List<String> slashParts = cleanedValue.split('/');
+
+    if (slashParts.length == 3) {
+      final int? first = int.tryParse(slashParts[0]);
+      final int? second = int.tryParse(slashParts[1]);
+      final int? year = int.tryParse(slashParts[2]);
+
+      if (first != null && second != null && year != null) {
+        // Expected alternative format: MM/DD/YYYY
+        try {
+          return DateTime(year, first, second);
+        } catch (_) {
+          return null;
+        }
+      }
+    }
+
+    return null;
   }
 
   Future<void> importProducts() async {
@@ -112,22 +148,23 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
           .map((value) => value.toString().trim())
           .toList();
 
-      final barcodeIndex = headers.indexOf('barcode');
-      final productNameIndex = headers.indexOf('productName');
-      final categoryIndex = headers.indexOf('category');
-      final buyingPriceIndex = headers.indexOf('buyingPrice');
-      final sellingPriceIndex = headers.indexOf('sellingPrice');
-      final stockIndex = headers.indexOf('stock');
-      final supplierIndex = headers.indexOf('supplier');
+      final int barcodeIndex = headers.indexOf('barcode');
+      final int productNameIndex = headers.indexOf('productName');
+      final int categoryIndex = headers.indexOf('category');
+      final int buyingPriceIndex = headers.indexOf('buyingPrice');
+      final int sellingPriceIndex = headers.indexOf('sellingPrice');
+      final int stockIndex = headers.indexOf('stock');
+      final int supplierIndex = headers.indexOf('supplier');
+      final int expirationDateIndex = headers.indexOf('expirationDate');
 
-      final firestore = FirebaseFirestore.instance;
+      final FirebaseFirestore firestore = FirebaseFirestore.instance;
 
       WriteBatch batch = firestore.batch();
       int batchWriteCount = 0;
 
       for (int rowIndex = 1; rowIndex < csvRows.length; rowIndex++) {
         try {
-          final row = csvRows[rowIndex];
+          final List<dynamic> row = csvRows[rowIndex];
 
           if (row.every((value) => value.toString().trim().isEmpty)) {
             continue;
@@ -141,35 +178,41 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
             return row[index].toString().trim();
           }
 
-          final barcode = readValue(barcodeIndex);
-          final productName = readValue(productNameIndex);
-          final category = readValue(categoryIndex);
-          final supplier = readValue(supplierIndex);
+          final String barcode = readValue(barcodeIndex);
+          final String productName = readValue(productNameIndex);
+          final String category = readValue(categoryIndex);
+          final String supplier = readValue(supplierIndex);
 
-          final buyingPrice = double.tryParse(readValue(buyingPriceIndex));
+          final double? buyingPrice = double.tryParse(
+            readValue(buyingPriceIndex),
+          );
 
-          final sellingPrice = double.tryParse(readValue(sellingPriceIndex));
+          final double? sellingPrice = double.tryParse(
+            readValue(sellingPriceIndex),
+          );
 
-          final stock = int.tryParse(
-            double.tryParse(readValue(stockIndex))?.toInt().toString() ?? '',
+          final int? stock = double.tryParse(readValue(stockIndex))?.toInt();
+
+          final DateTime? expirationDate = parseExpirationDate(
+            readValue(expirationDateIndex),
           );
 
           if (barcode.isEmpty ||
               productName.isEmpty ||
               buyingPrice == null ||
               sellingPrice == null ||
-              stock == null) {
+              stock == null ||
+              expirationDate == null) {
             failedCount++;
             continue;
           }
 
-          // Deterministic document ID prevents duplicate CSV imports.
-          final safeBarcode = barcode.replaceAll(
+          final String safeBarcode = barcode.replaceAll(
             RegExp(r'[^a-zA-Z0-9_-]'),
             '_',
           );
 
-          final productRef = firestore
+          final DocumentReference<Map<String, dynamic>> productRef = firestore
               .collection('products')
               .doc('barcode_$safeBarcode');
 
@@ -181,6 +224,7 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
             'sellingPrice': sellingPrice,
             'stock': stock,
             'supplier': supplier,
+            'expirationDate': Timestamp.fromDate(expirationDate),
             'createdAt': FieldValue.serverTimestamp(),
             'updatedAt': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
@@ -188,9 +232,9 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
           batchWriteCount++;
           successCount++;
 
-          // Commit in chunks to stay below Firestore batch limits.
           if (batchWriteCount >= 400) {
             await batch.commit();
+
             batch = firestore.batch();
             batchWriteCount = 0;
           }
@@ -209,9 +253,9 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
         isImporting = false;
       });
 
-      showDialog<void>(
+      await showDialog<void>(
         context: context,
-        builder: (context) {
+        builder: (dialogContext) {
           return AlertDialog(
             title: const Text('Import Completed'),
             content: Text(
@@ -221,7 +265,7 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
             actions: [
               TextButton(
                 onPressed: () {
-                  Navigator.pop(context);
+                  Navigator.pop(dialogContext);
                 },
                 child: const Text('OK'),
               ),
@@ -229,7 +273,7 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
           );
         },
       );
-    } catch (e) {
+    } catch (error) {
       if (!mounted) return;
 
       setState(() {
@@ -238,7 +282,7 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Import failed: $e'),
+          content: Text('Import failed: $error'),
           backgroundColor: Colors.red,
         ),
       );
@@ -247,7 +291,7 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final productCount = csvRows.isEmpty ? 0 : csvRows.length - 1;
+    final int productCount = csvRows.isEmpty ? 0 : csvRows.length - 1;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
@@ -285,7 +329,6 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
                     style: TextStyle(color: Colors.grey),
                   ),
                   const SizedBox(height: 25),
-
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(15),
@@ -310,9 +353,7 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 20),
-
                   SizedBox(
                     width: double.infinity,
                     height: 52,
@@ -322,9 +363,7 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
                       label: const Text('CHOOSE CSV FILE'),
                     ),
                   ),
-
                   const SizedBox(height: 12),
-
                   SizedBox(
                     width: double.infinity,
                     height: 52,
@@ -353,9 +392,7 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
               ),
             ),
           ),
-
           const SizedBox(height: 18),
-
           const Card(
             child: Padding(
               padding: EdgeInsets.all(18),
@@ -368,8 +405,14 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
                   ),
                   SizedBox(height: 10),
                   Text(
-                    'barcode, productName, category, buyingPrice, '
-                    'sellingPrice, stock, supplier',
+                    'barcode, productName, category, '
+                    'buyingPrice, sellingPrice, stock, '
+                    'supplier, expirationDate',
+                  ),
+                  SizedBox(height: 10),
+                  Text(
+                    'Expiration date format: YYYY-MM-DD',
+                    style: TextStyle(color: Colors.grey),
                   ),
                 ],
               ),

@@ -57,22 +57,22 @@ class DefaultFirebaseOptions {
     projectId: 'eu-mart-mobile',
     storageBucket: 'eu-mart-mobile.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyACXDXHuAwhGjvllCc-t3oVNTotKVm5FhY',
     appId: '1:223216256838:ios:1d8937a0e7cafb8ee20747',
     messagingSenderId: '223216256838',
     projectId: 'eu-mart-mobile',
     storageBucket: 'eu-mart-mobile.firebasestorage.app',
+    iosClientId: '223216256838-mj9kdmeh7fstnmmcrqdkg5g3odkjclu9.apps.googleusercontent.com',
     iosBundleId: 'com.example.euMartMobile',
   );
-
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyACXDXHuAwhGjvllCc-t3oVNTotKVm5FhY',
     appId: '1:223216256838:ios:1d8937a0e7cafb8ee20747',
     messagingSenderId: '223216256838',
     projectId: 'eu-mart-mobile',
     storageBucket: 'eu-mart-mobile.firebasestorage.app',
+    iosClientId: '223216256838-mj9kdmeh7fstnmmcrqdkg5g3odkjclu9.apps.googleusercontent.com',
     iosBundleId: 'com.example.euMartMobile',
   );
 

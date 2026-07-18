@@ -1,0 +1,39 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "eu-mart-mobile",
+          "appId": "1:223216256838:android:a9ce4342b78dd437e20747",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "eu-mart-mobile",
+          "configurations": {
+            "android": "1:223216256838:android:a9ce4342b78dd437e20747",
+            "ios": "1:223216256838:ios:b495b88ff401404ae20747",
+            "macos": "1:223216256838:ios:b495b88ff401404ae20747",
+            "web": "1:223216256838:web:15539a54d0858240e20747",
+            "windows": "1:223216256838:web:d07d6274a31e547ee20747"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
