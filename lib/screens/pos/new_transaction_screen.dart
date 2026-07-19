@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_ai/firebase_ai.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/cart_item.dart';
@@ -25,7 +26,18 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
 
   String search = '';
   bool isProcessing = false;
+  bool isSearchingWithAI = false;
+  String? aiSearchError;
+  List<String> aiSuggestedProductIds = [];
   Timer? _searchDebounce;
+
+  late final GenerativeModel _aiModel;
+
+  @override
+  void initState() {
+    super.initState();
+    _aiModel = FirebaseAI.googleAI().generativeModel(model: 'gemini-3.5-flash');
+  }
 
   double get total => cart.fold(0, (sum, item) => sum + item.subtotal);
 
@@ -433,6 +445,116 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
         );
       },
     );
+  }
+
+  Future<void> _askAiSuggestions(
+    List<QueryDocumentSnapshot<Object?>> docs,
+  ) async {
+    final userQuery = searchController.text.trim();
+
+    if (userQuery.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a product description first.')),
+      );
+      return;
+    }
+
+    setState(() {
+      isSearchingWithAI = true;
+      aiSearchError = null;
+      aiSuggestedProductIds = [];
+    });
+
+    try {
+      final products = docs.map(_productFromDocument).take(120).toList();
+
+      final catalog = products
+          .map((product) {
+            return [
+              'ID=${product.id}',
+              'name=${product.productName}',
+              if (product.brand.isNotEmpty) 'brand=${product.brand}',
+              if (product.category.isNotEmpty) 'category=${product.category}',
+              if (product.barcode.isNotEmpty) 'barcode=${product.barcode}',
+              'stock=${product.stock}',
+            ].join(' | ');
+          })
+          .join('\n');
+
+      final prompt =
+          '''
+You are the product-search assistant for EÜ MART.
+
+The cashier searched for:
+"$userQuery"
+
+Choose up to 5 products from the catalog that best match the request.
+Understand misspellings, incomplete names, Filipino or English descriptions,
+brands, categories, sizes, and common grocery terms.
+
+STRICT RULES:
+1. Use only product IDs that appear in the catalog.
+2. Never invent a product, price, stock, barcode, or ID.
+3. Prefer in-stock products.
+4. Return only the matching document IDs separated by commas.
+5. If there is no reasonable match, return NONE.
+
+CATALOG:
+$catalog
+''';
+
+      final response = await _aiModel.generateContent([Content.text(prompt)]);
+
+      final raw = (response.text ?? '').trim();
+
+      if (!mounted) return;
+
+      if (raw.isEmpty || raw.toUpperCase().contains('NONE')) {
+        setState(() {
+          aiSuggestedProductIds = [];
+          aiSearchError = 'AI found no suitable product.';
+          isSearchingWithAI = false;
+        });
+        return;
+      }
+
+      final validIds = docs.map((doc) => doc.id).toSet();
+      final parsedIds = raw
+          .replaceAll(RegExp(r'[`"\[\]]'), '')
+          .split(RegExp(r'[,\n]'))
+          .map((value) => value.trim())
+          .where((value) => validIds.contains(value))
+          .toSet()
+          .take(5)
+          .toList();
+
+      setState(() {
+        aiSuggestedProductIds = parsedIds;
+        aiSearchError = parsedIds.isEmpty
+            ? 'AI responded, but no valid Firestore product IDs were returned.'
+            : null;
+        isSearchingWithAI = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        isSearchingWithAI = false;
+        aiSearchError = 'AI search failed: $error';
+      });
+    }
+  }
+
+  List<_ProductData> _getAiSuggestedProducts(
+    List<QueryDocumentSnapshot<Object?>> docs,
+  ) {
+    final productsById = {
+      for (final doc in docs) doc.id: _productFromDocument(doc),
+    };
+
+    return aiSuggestedProductIds
+        .map((id) => productsById[id])
+        .whereType<_ProductData>()
+        .toList();
   }
 
   List<_ProductSearchResult> _rankProducts(
@@ -949,27 +1071,67 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
     }
 
     if (rankedResults.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(30),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.search_off, size: 70, color: Colors.grey),
-              const SizedBox(height: 15),
-              const Text(
-                'No close match found',
-                style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 7),
-              Text(
-                'Try another spelling, product brand, category, or barcode.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey.shade600),
-              ),
-            ],
+      final aiProducts = _getAiSuggestedProducts(docs);
+
+      return ListView(
+        padding: const EdgeInsets.all(24),
+        children: [
+          const SizedBox(height: 30),
+          const Icon(Icons.search_off, size: 70, color: Colors.grey),
+          const SizedBox(height: 15),
+          const Text(
+            'No close local match found',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
           ),
-        ),
+          const SizedBox(height: 7),
+          Text(
+            'Ask Gemini to understand misspellings or product descriptions.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 22),
+          SizedBox(
+            height: 52,
+            child: ElevatedButton.icon(
+              onPressed: isSearchingWithAI
+                  ? null
+                  : () => _askAiSuggestions(docs),
+              icon: isSearchingWithAI
+                  ? const SizedBox(
+                      width: 19,
+                      height: 19,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.auto_awesome),
+              label: Text(
+                isSearchingWithAI
+                    ? 'ASKING AI...'
+                    : 'ASK AI FOR PRODUCT SUGGESTIONS',
+              ),
+            ),
+          ),
+          if (aiSearchError != null) ...[
+            const SizedBox(height: 14),
+            Text(
+              aiSearchError!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.red),
+            ),
+          ],
+          if (aiProducts.isNotEmpty) ...[
+            const SizedBox(height: 26),
+            _buildSectionTitle('Gemini AI Suggestions', Icons.auto_awesome),
+            ...aiProducts.map(
+              (product) => _buildProductCard(
+                product: product,
+                badge: 'AI Suggested Match',
+                highlighted: true,
+              ),
+            ),
+          ],
+          const SizedBox(height: 80),
+        ],
       );
     }
 
@@ -980,7 +1142,7 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
     return ListView(
       padding: const EdgeInsets.all(15),
       children: [
-        _buildSectionTitle('AI Best Match', Icons.auto_awesome),
+        _buildSectionTitle('Intelligent Best Match', Icons.auto_awesome),
         _buildProductCard(
           product: bestMatch.product,
           badge: bestMatch.matchLabel,
