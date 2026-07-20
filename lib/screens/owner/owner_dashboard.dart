@@ -403,45 +403,50 @@ class OwnerDashboard extends StatelessWidget {
     required String value,
     required IconData icon,
     required Color color,
+    required VoidCallback onTap,
   }) {
     return Card(
       elevation: 3,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      child: Padding(
-        padding: const EdgeInsets.all(13),
-        child: Row(
-          children: [
-            CircleAvatar(
-              backgroundColor: color.withValues(alpha: 0.15),
-              child: Icon(icon, color: color),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.grey, fontSize: 12),
-                  ),
-                  const SizedBox(height: 3),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      value,
-                      style: const TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.bold,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.all(13),
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: color.withValues(alpha: 0.15),
+                child: Icon(icon, color: color),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                    const SizedBox(height: 3),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        value,
+                        style: const TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -660,6 +665,96 @@ class OwnerDashboard extends StatelessWidget {
     );
   }
 
+  Widget _countBadge({
+    required int count,
+    required IconData icon,
+    required VoidCallback onTap,
+    String? tooltip,
+  }) {
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onTap,
+      icon: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Icon(icon),
+          if (count > 0)
+            Positioned(
+              right: -7,
+              top: -7,
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+                child: Text(
+                  count > 99 ? '99+' : '$count',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _notificationBadge(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('notifications')
+          .where('isRead', isEqualTo: false)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final count = snapshot.data?.docs.length ?? 0;
+        return _countBadge(
+          count: count,
+          icon: Icons.notifications_outlined,
+          tooltip: 'Notifications',
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _transactionBadge(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('transactions').snapshots(),
+      builder: (context, snapshot) {
+        final docs = snapshot.data?.docs ?? [];
+        final count = docs
+            .where((doc) => doc.data()['isViewedByOwner'] != true)
+            .length;
+
+        return _countBadge(
+          count: count,
+          icon: Icons.receipt_long_outlined,
+          tooltip: 'New transactions',
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const OwnerTransactionHistoryScreen(),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -672,6 +767,11 @@ class OwnerDashboard extends StatelessWidget {
           'EÜ MART',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
+        actions: [
+          _transactionBadge(context),
+          _notificationBadge(context),
+          const SizedBox(width: 6),
+        ],
       ),
       body: StreamBuilder<Map<String, dynamic>>(
         stream: _dashboardData(),
@@ -754,24 +854,62 @@ class OwnerDashboard extends StatelessWidget {
                       value: '$totalProducts',
                       icon: Icons.inventory_2,
                       color: Colors.blue,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                const InventoryScreen(initialFilter: 'all'),
+                          ),
+                        );
+                      },
                     ),
                     _summaryCard(
                       title: 'Low Stock',
                       value: '$lowStock',
                       icon: Icons.warning_amber_rounded,
                       color: Colors.orange,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const InventoryScreen(
+                              initialFilter: 'lowStock',
+                            ),
+                          ),
+                        );
+                      },
                     ),
                     _summaryCard(
                       title: 'Expired',
                       value: '$expiredProducts',
                       icon: Icons.error_outline,
                       color: Colors.red,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                const InventoryScreen(initialFilter: 'expired'),
+                          ),
+                        );
+                      },
                     ),
                     _summaryCard(
                       title: 'Expiring Soon',
                       value: '$expiringSoon',
                       icon: Icons.schedule,
                       color: Colors.deepOrange,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const InventoryScreen(
+                              initialFilter: 'expiringSoon',
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),

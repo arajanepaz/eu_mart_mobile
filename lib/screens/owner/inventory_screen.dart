@@ -6,7 +6,9 @@ import 'edit_product_screen.dart';
 import 'import_products_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
-  const InventoryScreen({super.key});
+  final String initialFilter;
+
+  const InventoryScreen({super.key, this.initialFilter = 'all'});
 
   @override
   State<InventoryScreen> createState() => _InventoryScreenState();
@@ -16,7 +18,36 @@ class _InventoryScreenState extends State<InventoryScreen> {
   final TextEditingController searchController = TextEditingController();
 
   String search = '';
+  late String selectedFilter;
   bool _deletingAllProducts = false;
+
+  @override
+  void initState() {
+    super.initState();
+    selectedFilter = widget.initialFilter;
+  }
+
+  DateTime? _readDate(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value.trim());
+    return null;
+  }
+
+  String _filterTitle() {
+    switch (selectedFilter) {
+      case 'lowStock':
+        return 'Low Stock Products';
+      case 'expired':
+        return 'Expired Products';
+      case 'expiringSoon':
+        return 'Expiring Soon';
+      case 'recentlyUpdated':
+        return 'Recently Updated';
+      default:
+        return 'All Products';
+    }
+  }
 
   Future<void> confirmDelete({
     required String documentId,
@@ -302,7 +333,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
-        title: const Text('Inventory'),
+        title: Text('Inventory • ${_filterTitle()}'),
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
         actions: [
@@ -385,7 +416,39 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 });
               },
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final filter in const [
+                    ('all', 'All'),
+                    ('lowStock', 'Low Stock'),
+                    ('expired', 'Expired'),
+                    ('expiringSoon', 'Expiring Soon'),
+                    ('recentlyUpdated', 'Recently Updated'),
+                  ])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(filter.$2),
+                        selected: selectedFilter == filter.$1,
+                        onSelected: (_) {
+                          setState(() => selectedFilter = filter.$1);
+                        },
+                        selectedColor: const Color(0xFF1565C0),
+                        labelStyle: TextStyle(
+                          color: selectedFilter == filter.$1
+                              ? Colors.white
+                              : Colors.black87,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
@@ -422,12 +485,47 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         .toString()
                         .toLowerCase();
 
-                    if (search.isEmpty) {
-                      return true;
-                    }
-
-                    return productName.contains(search) ||
+                    final matchesSearch =
+                        search.isEmpty ||
+                        productName.contains(search) ||
                         barcode.contains(search);
+
+                    if (!matchesSearch) return false;
+
+                    final int stock = (data['stock'] as num?)?.toInt() ?? 0;
+                    final DateTime? expiration = _readDate(
+                      data['expirationDate'],
+                    );
+                    final DateTime? updatedAt = _readDate(data['updatedAt']);
+                    final now = DateTime.now();
+                    final today = DateTime(now.year, now.month, now.day);
+
+                    switch (selectedFilter) {
+                      case 'lowStock':
+                        return stock <= 10;
+                      case 'expired':
+                        if (expiration == null) return false;
+                        final expiryDay = DateTime(
+                          expiration.year,
+                          expiration.month,
+                          expiration.day,
+                        );
+                        return expiryDay.isBefore(today);
+                      case 'expiringSoon':
+                        if (expiration == null) return false;
+                        final expiryDay = DateTime(
+                          expiration.year,
+                          expiration.month,
+                          expiration.day,
+                        );
+                        final days = expiryDay.difference(today).inDays;
+                        return days >= 0 && days <= 7;
+                      case 'recentlyUpdated':
+                        if (updatedAt == null) return false;
+                        return now.difference(updatedAt).inHours <= 24;
+                      default:
+                        return true;
+                    }
                   }).toList();
 
                   if (filteredProducts.isEmpty) {
@@ -475,6 +573,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           (data['sellingPrice'] as num?)?.toDouble() ?? 0;
 
                       final int stock = (data['stock'] as num?)?.toInt() ?? 0;
+                      final DateTime? updatedAt = _readDate(data['updatedAt']);
+                      final bool recentlyUpdated =
+                          updatedAt != null &&
+                          DateTime.now().difference(updatedAt).inHours <= 24;
+                      final String lastChangeType =
+                          (data['lastChangeType'] ?? '').toString();
 
                       final bool isOutOfStock = stock <= 0;
                       final bool isLowStock = stock > 0 && stock <= 10;

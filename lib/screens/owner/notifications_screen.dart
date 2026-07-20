@@ -1,8 +1,33 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-class NotificationsScreen extends StatelessWidget {
+class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
+
+  @override
+  State<NotificationsScreen> createState() => _NotificationsScreenState();
+}
+
+class _NotificationsScreenState extends State<NotificationsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _markUpdateNotificationsRead();
+  }
+
+  Future<void> _markUpdateNotificationsRead() async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('notifications')
+        .where('isRead', isEqualTo: false)
+        .get();
+
+    if (snapshot.docs.isEmpty) return;
+    final batch = FirebaseFirestore.instance.batch();
+    for (final doc in snapshot.docs) {
+      batch.update(doc.reference, {'isRead': true});
+    }
+    await batch.commit();
+  }
 
   DateTime? parseExpirationDate(dynamic value) {
     if (value == null) return null;
@@ -254,226 +279,293 @@ class NotificationsScreen extends StatelessWidget {
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
       ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: FirebaseFirestore.instance.collection('products').snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting &&
-              !snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
+      body: Column(
+        children: [
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance
+                .collection('notifications')
+                .orderBy('createdAt', descending: true)
+                .limit(10)
+                .snapshots(),
+            builder: (context, updateSnapshot) {
+              final docs = updateSnapshot.data?.docs ?? [];
+              if (docs.isEmpty) return const SizedBox.shrink();
 
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  'Unable to load notifications.\n'
-                  '${snapshot.error}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.red),
+              return Container(
+                width: double.infinity,
+                constraints: const BoxConstraints(maxHeight: 230),
+                margin: const EdgeInsets.fromLTRB(14, 14, 14, 4),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.blue.shade100),
                 ),
-              ),
-            );
-          }
-
-          final documents = snapshot.data?.docs ?? [];
-
-          final List<Map<String, dynamic>> expiredProducts = [];
-
-          final List<Map<String, dynamic>> expiringToday = [];
-
-          final List<Map<String, dynamic>> expiringWithinSevenDays = [];
-
-          final List<Map<String, dynamic>> expiringWithinThirtyDays = [];
-
-          final List<Map<String, dynamic>> stockAlerts = [];
-
-          for (final document in documents) {
-            final data = document.data();
-
-            final String productName =
-                (data['productName'] ?? 'Unknown Product').toString();
-
-            final int stock = (data['stock'] as num?)?.toInt() ?? 0;
-
-            if (stock <= 10) {
-              stockAlerts.add({'productName': productName, 'stock': stock});
-            }
-
-            final DateTime? expirationDate = parseExpirationDate(
-              data['expirationDate'],
-            );
-
-            if (expirationDate == null) {
-              continue;
-            }
-
-            final int daysRemaining = daysFromToday(expirationDate);
-
-            final productAlert = <String, dynamic>{
-              'productName': productName,
-              'expirationDate': expirationDate,
-              'daysRemaining': daysRemaining,
-            };
-
-            if (daysRemaining < 0) {
-              expiredProducts.add(productAlert);
-            } else if (daysRemaining == 0) {
-              expiringToday.add(productAlert);
-            } else if (daysRemaining <= 7) {
-              expiringWithinSevenDays.add(productAlert);
-            } else if (daysRemaining <= 30) {
-              expiringWithinThirtyDays.add(productAlert);
-            }
-          }
-
-          expiredProducts.sort(
-            (a, b) => (a['daysRemaining'] as int).compareTo(
-              b['daysRemaining'] as int,
-            ),
-          );
-
-          expiringWithinSevenDays.sort(
-            (a, b) => (a['daysRemaining'] as int).compareTo(
-              b['daysRemaining'] as int,
-            ),
-          );
-
-          expiringWithinThirtyDays.sort(
-            (a, b) => (a['daysRemaining'] as int).compareTo(
-              b['daysRemaining'] as int,
-            ),
-          );
-
-          stockAlerts.sort(
-            (a, b) => (a['stock'] as int).compareTo(b['stock'] as int),
-          );
-
-          final bool hasNotifications =
-              expiredProducts.isNotEmpty ||
-              expiringToday.isNotEmpty ||
-              expiringWithinSevenDays.isNotEmpty ||
-              expiringWithinThirtyDays.isNotEmpty ||
-              stockAlerts.isNotEmpty;
-
-          if (!hasNotifications) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(30),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                child: ListView(
+                  shrinkWrap: true,
                   children: [
-                    Icon(
-                      Icons.notifications_none,
-                      size: 80,
-                      color: Colors.grey,
-                    ),
-                    SizedBox(height: 15),
-                    Text(
-                      'No notifications.',
+                    const Text(
+                      'Recent Updates',
                       style: TextStyle(
-                        fontSize: 19,
+                        fontSize: 17,
                         fontWeight: FontWeight.bold,
+                        color: Color(0xFF1565C0),
                       ),
                     ),
-                    SizedBox(height: 6),
-                    Text(
-                      'All products have safe stock and expiration dates.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey),
-                    ),
+                    const SizedBox(height: 8),
+                    ...docs.map((doc) {
+                      final data = doc.data();
+                      return ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: const CircleAvatar(
+                          backgroundColor: Color(0xFFE3F2FD),
+                          child: Icon(
+                            Icons.notifications_active,
+                            color: Color(0xFF1565C0),
+                          ),
+                        ),
+                        title: Text(
+                          (data['title'] ?? 'Product Update').toString(),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text((data['message'] ?? '').toString()),
+                      );
+                    }),
                   ],
                 ),
-              ),
-            );
-          }
+              );
+            },
+          ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: FirebaseFirestore.instance
+                  .collection('products')
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting &&
+                    !snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              if (expiredProducts.isNotEmpty) ...[
-                sectionHeader(
-                  title: 'Expired Products',
-                  icon: Icons.error,
-                  color: Colors.red,
-                  count: expiredProducts.length,
-                ),
-                ...expiredProducts.map(
-                  (product) => expirationCard(
-                    productName: product['productName'] as String,
-                    expirationDate: product['expirationDate'] as DateTime,
-                    daysRemaining: product['daysRemaining'] as int,
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'Unable to load notifications.\n'
+                        '${snapshot.error}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  );
+                }
+
+                final documents = snapshot.data?.docs ?? [];
+
+                final List<Map<String, dynamic>> expiredProducts = [];
+
+                final List<Map<String, dynamic>> expiringToday = [];
+
+                final List<Map<String, dynamic>> expiringWithinSevenDays = [];
+
+                final List<Map<String, dynamic>> expiringWithinThirtyDays = [];
+
+                final List<Map<String, dynamic>> stockAlerts = [];
+
+                for (final document in documents) {
+                  final data = document.data();
+
+                  final String productName =
+                      (data['productName'] ?? 'Unknown Product').toString();
+
+                  final int stock = (data['stock'] as num?)?.toInt() ?? 0;
+
+                  if (stock <= 10) {
+                    stockAlerts.add({
+                      'productName': productName,
+                      'stock': stock,
+                    });
+                  }
+
+                  final DateTime? expirationDate = parseExpirationDate(
+                    data['expirationDate'],
+                  );
+
+                  if (expirationDate == null) {
+                    continue;
+                  }
+
+                  final int daysRemaining = daysFromToday(expirationDate);
+
+                  final productAlert = <String, dynamic>{
+                    'productName': productName,
+                    'expirationDate': expirationDate,
+                    'daysRemaining': daysRemaining,
+                  };
+
+                  if (daysRemaining < 0) {
+                    expiredProducts.add(productAlert);
+                  } else if (daysRemaining == 0) {
+                    expiringToday.add(productAlert);
+                  } else if (daysRemaining <= 7) {
+                    expiringWithinSevenDays.add(productAlert);
+                  } else if (daysRemaining <= 30) {
+                    expiringWithinThirtyDays.add(productAlert);
+                  }
+                }
+
+                expiredProducts.sort(
+                  (a, b) => (a['daysRemaining'] as int).compareTo(
+                    b['daysRemaining'] as int,
                   ),
-                ),
-              ],
+                );
 
-              if (expiringToday.isNotEmpty) ...[
-                sectionHeader(
-                  title: 'Expiring Today',
-                  icon: Icons.today,
-                  color: Colors.deepOrange,
-                  count: expiringToday.length,
-                ),
-                ...expiringToday.map(
-                  (product) => expirationCard(
-                    productName: product['productName'] as String,
-                    expirationDate: product['expirationDate'] as DateTime,
-                    daysRemaining: product['daysRemaining'] as int,
+                expiringWithinSevenDays.sort(
+                  (a, b) => (a['daysRemaining'] as int).compareTo(
+                    b['daysRemaining'] as int,
                   ),
-                ),
-              ],
+                );
 
-              if (expiringWithinSevenDays.isNotEmpty) ...[
-                sectionHeader(
-                  title: 'Expiring Within 7 Days',
-                  icon: Icons.warning_amber_rounded,
-                  color: Colors.orange,
-                  count: expiringWithinSevenDays.length,
-                ),
-                ...expiringWithinSevenDays.map(
-                  (product) => expirationCard(
-                    productName: product['productName'] as String,
-                    expirationDate: product['expirationDate'] as DateTime,
-                    daysRemaining: product['daysRemaining'] as int,
+                expiringWithinThirtyDays.sort(
+                  (a, b) => (a['daysRemaining'] as int).compareTo(
+                    b['daysRemaining'] as int,
                   ),
-                ),
-              ],
+                );
 
-              if (expiringWithinThirtyDays.isNotEmpty) ...[
-                sectionHeader(
-                  title: 'Expiring Within 30 Days',
-                  icon: Icons.schedule,
-                  color: Colors.amber.shade800,
-                  count: expiringWithinThirtyDays.length,
-                ),
-                ...expiringWithinThirtyDays.map(
-                  (product) => expirationCard(
-                    productName: product['productName'] as String,
-                    expirationDate: product['expirationDate'] as DateTime,
-                    daysRemaining: product['daysRemaining'] as int,
-                  ),
-                ),
-              ],
+                stockAlerts.sort(
+                  (a, b) => (a['stock'] as int).compareTo(b['stock'] as int),
+                );
 
-              if (stockAlerts.isNotEmpty) ...[
-                sectionHeader(
-                  title: 'Stock Alerts',
-                  icon: Icons.inventory_2_outlined,
-                  color: Colors.blueGrey,
-                  count: stockAlerts.length,
-                ),
-                ...stockAlerts.map(
-                  (product) => stockCard(
-                    productName: product['productName'] as String,
-                    stock: product['stock'] as int,
-                  ),
-                ),
-              ],
+                final bool hasNotifications =
+                    expiredProducts.isNotEmpty ||
+                    expiringToday.isNotEmpty ||
+                    expiringWithinSevenDays.isNotEmpty ||
+                    expiringWithinThirtyDays.isNotEmpty ||
+                    stockAlerts.isNotEmpty;
 
-              const SizedBox(height: 20),
-            ],
-          );
-        },
+                if (!hasNotifications) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(30),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.notifications_none,
+                            size: 80,
+                            color: Colors.grey,
+                          ),
+                          SizedBox(height: 15),
+                          Text(
+                            'No notifications.',
+                            style: TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          SizedBox(height: 6),
+                          Text(
+                            'All products have safe stock and expiration dates.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+
+                return ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    if (expiredProducts.isNotEmpty) ...[
+                      sectionHeader(
+                        title: 'Expired Products',
+                        icon: Icons.error,
+                        color: Colors.red,
+                        count: expiredProducts.length,
+                      ),
+                      ...expiredProducts.map(
+                        (product) => expirationCard(
+                          productName: product['productName'] as String,
+                          expirationDate: product['expirationDate'] as DateTime,
+                          daysRemaining: product['daysRemaining'] as int,
+                        ),
+                      ),
+                    ],
+
+                    if (expiringToday.isNotEmpty) ...[
+                      sectionHeader(
+                        title: 'Expiring Today',
+                        icon: Icons.today,
+                        color: Colors.deepOrange,
+                        count: expiringToday.length,
+                      ),
+                      ...expiringToday.map(
+                        (product) => expirationCard(
+                          productName: product['productName'] as String,
+                          expirationDate: product['expirationDate'] as DateTime,
+                          daysRemaining: product['daysRemaining'] as int,
+                        ),
+                      ),
+                    ],
+
+                    if (expiringWithinSevenDays.isNotEmpty) ...[
+                      sectionHeader(
+                        title: 'Expiring Within 7 Days',
+                        icon: Icons.warning_amber_rounded,
+                        color: Colors.orange,
+                        count: expiringWithinSevenDays.length,
+                      ),
+                      ...expiringWithinSevenDays.map(
+                        (product) => expirationCard(
+                          productName: product['productName'] as String,
+                          expirationDate: product['expirationDate'] as DateTime,
+                          daysRemaining: product['daysRemaining'] as int,
+                        ),
+                      ),
+                    ],
+
+                    if (expiringWithinThirtyDays.isNotEmpty) ...[
+                      sectionHeader(
+                        title: 'Expiring Within 30 Days',
+                        icon: Icons.schedule,
+                        color: Colors.amber.shade800,
+                        count: expiringWithinThirtyDays.length,
+                      ),
+                      ...expiringWithinThirtyDays.map(
+                        (product) => expirationCard(
+                          productName: product['productName'] as String,
+                          expirationDate: product['expirationDate'] as DateTime,
+                          daysRemaining: product['daysRemaining'] as int,
+                        ),
+                      ),
+                    ],
+
+                    if (stockAlerts.isNotEmpty) ...[
+                      sectionHeader(
+                        title: 'Stock Alerts',
+                        icon: Icons.inventory_2_outlined,
+                        color: Colors.blueGrey,
+                        count: stockAlerts.length,
+                      ),
+                      ...stockAlerts.map(
+                        (product) => stockCard(
+                          productName: product['productName'] as String,
+                          stock: product['stock'] as int,
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 20),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

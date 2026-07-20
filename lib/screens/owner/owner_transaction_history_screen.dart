@@ -17,6 +17,30 @@ class _OwnerTransactionHistoryScreenState
   String _searchQuery = '';
   String _selectedFilter = 'All';
 
+  @override
+  void initState() {
+    super.initState();
+    _markTransactionsViewed();
+  }
+
+  Future<void> _markTransactionsViewed() async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('transactions')
+        .get();
+
+    final unread = snapshot.docs
+        .where((doc) => doc.data()['isViewedByOwner'] != true)
+        .toList();
+
+    if (unread.isEmpty) return;
+
+    final batch = FirebaseFirestore.instance.batch();
+    for (final doc in unread) {
+      batch.update(doc.reference, {'isViewedByOwner': true});
+    }
+    await batch.commit();
+  }
+
   bool _matchesDateFilter(DateTime? date) {
     if (_selectedFilter == 'All') return true;
     if (date == null) return false;
@@ -387,6 +411,7 @@ class _OwnerTransactionHistoryScreenState
                           final change =
                               (data['change'] as num?)?.toDouble() ?? 0;
                           final createdAt = _readDate(data['createdAt']);
+                          final bool isNew = data['isViewedByOwner'] != true;
 
                           final dateText = createdAt == null
                               ? 'Date unavailable'
