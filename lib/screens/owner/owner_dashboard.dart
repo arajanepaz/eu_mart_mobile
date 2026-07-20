@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -840,6 +842,9 @@ class OwnerDashboard extends StatelessWidget {
                   'Here is your store overview.',
                   style: TextStyle(color: Colors.grey),
                 ),
+                const SizedBox(height: 16),
+                const OwnerAnimatedPromoBanner(),
+                const SizedBox(height: 16),
                 const SizedBox(height: 20),
                 GridView.count(
                   shrinkWrap: true,
@@ -993,6 +998,433 @@ class OwnerDashboard extends StatelessWidget {
   }
 }
 
+class OwnerAnimatedPromoBanner extends StatefulWidget {
+  const OwnerAnimatedPromoBanner({super.key});
+
+  @override
+  State<OwnerAnimatedPromoBanner> createState() =>
+      _OwnerAnimatedPromoBannerState();
+}
+
+class _OwnerAnimatedPromoBannerState extends State<OwnerAnimatedPromoBanner> {
+  int _currentIndex = 0;
+  Timer? _timer;
+
+  DateTime? _readDate(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value.trim());
+    return null;
+  }
+
+  int _daysRemaining(DateTime expirationDate) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final expiry = DateTime(
+      expirationDate.year,
+      expirationDate.month,
+      expirationDate.day,
+    );
+    return expiry.difference(today).inDays;
+  }
+
+  String _suggestedPromo(int daysRemaining) {
+    if (daysRemaining <= 2) return '30% OFF';
+    if (daysRemaining <= 4) return '20% OFF';
+    if (daysRemaining <= 7) return '10% OFF';
+    return '5% OFF';
+  }
+
+  int _suggestedDiscount(int daysRemaining) {
+    if (daysRemaining <= 2) return 30;
+    if (daysRemaining <= 4) return 20;
+    if (daysRemaining <= 7) return 10;
+    return 5;
+  }
+
+  void _ensureTimer(int itemCount) {
+    if (itemCount <= 1) {
+      _timer?.cancel();
+      _timer = null;
+      return;
+    }
+
+    if (_timer != null) return;
+
+    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      setState(() {
+        _currentIndex = (_currentIndex + 1) % itemCount;
+      });
+    });
+  }
+
+  Future<void> _activateDiscount({
+    required DocumentReference<Map<String, dynamic>> reference,
+    required int discountPercent,
+    required String productName,
+  }) async {
+    try {
+      await reference.update({
+        'promoActive': true,
+        'promoType': 'percentage',
+        'promoLabel': '$discountPercent% OFF',
+        'discountPercent': discountPercent,
+        'promoUpdatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$discountPercent% OFF activated for $productName.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to activate promo: $error'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _activateBuyOneTakeOne({
+    required DocumentReference<Map<String, dynamic>> reference,
+    required String productName,
+  }) async {
+    try {
+      await reference.update({
+        'promoActive': true,
+        'promoType': 'buy1take1',
+        'promoLabel': 'BUY 1 TAKE 1',
+        'buyQuantity': 1,
+        'freeQuantity': 1,
+        'discountPercent': 0,
+        'promoUpdatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Buy 1 Take 1 activated for $productName.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to activate promo: $error'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deactivatePromo({
+    required DocumentReference<Map<String, dynamic>> reference,
+    required String productName,
+  }) async {
+    try {
+      await reference.update({
+        'promoActive': false,
+        'promoLabel': FieldValue.delete(),
+        'promoType': FieldValue.delete(),
+        'discountPercent': FieldValue.delete(),
+        'buyQuantity': FieldValue.delete(),
+        'freeQuantity': FieldValue.delete(),
+        'promoUpdatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Promo removed from $productName.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to remove promo: $error'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('products').snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const SizedBox(
+            height: 190,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+
+        final eligibleProducts =
+            docs.where((document) {
+              final data = document.data();
+              final stock = (data['stock'] as num?)?.toInt() ?? 0;
+              final expiration = _readDate(data['expirationDate']);
+
+              if (stock <= 0 || expiration == null) return false;
+
+              final days = _daysRemaining(expiration);
+              return days >= 0 && days <= 14;
+            }).toList()..sort((a, b) {
+              final first = _readDate(a.data()['expirationDate']);
+              final second = _readDate(b.data()['expirationDate']);
+              if (first == null || second == null) return 0;
+              return first.compareTo(second);
+            });
+
+        if (eligibleProducts.isEmpty) {
+          _timer?.cancel();
+          _timer = null;
+
+          return Card(
+            elevation: 3,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Padding(
+              padding: EdgeInsets.all(18),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor: Color(0xFFE8F5E9),
+                    child: Icon(Icons.check_circle, color: Colors.green),
+                  ),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'No products are expiring within the next 14 days.',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        if (_currentIndex >= eligibleProducts.length) {
+          _currentIndex = 0;
+        }
+
+        _ensureTimer(eligibleProducts.length);
+
+        final document = eligibleProducts[_currentIndex];
+        final data = document.data();
+
+        final productName = (data['productName'] ?? 'Unknown Product')
+            .toString();
+        final imagePath =
+            (data['imagePath'] ?? 'assets/images/products/default_product.png')
+                .toString();
+        final expiration = _readDate(data['expirationDate'])!;
+        final days = _daysRemaining(expiration);
+        final suggestedDiscount = _suggestedDiscount(days);
+        final suggestedPromo = _suggestedPromo(days);
+        final promoActive = data['promoActive'] == true;
+        final promoLabel = (data['promoLabel'] ?? '').toString();
+
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 650),
+          transitionBuilder: (child, animation) {
+            final offsetAnimation = Tween<Offset>(
+              begin: const Offset(0.15, 0),
+              end: Offset.zero,
+            ).animate(animation);
+
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(position: offsetAnimation, child: child),
+            );
+          },
+          child: Container(
+            key: ValueKey(document.id),
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: promoActive
+                    ? const [Color(0xFF1B5E20), Color(0xFF43A047)]
+                    : const [Color(0xFFE65100), Color(0xFFFF8F00)],
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 10,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.local_offer, color: Colors.white),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        promoActive
+                            ? 'ACTIVE PROMO'
+                            : 'EXPIRING PRODUCT PROMO SUGGESTION',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${_currentIndex + 1}/${eligibleProducts.length}',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Container(
+                      width: 82,
+                      height: 82,
+                      padding: const EdgeInsets.all(5),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(11),
+                        child: Image.asset(
+                          imagePath,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) {
+                            return const Icon(
+                              Icons.inventory_2_outlined,
+                              size: 45,
+                              color: Colors.grey,
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            productName,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 19,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            days == 0
+                                ? 'Expires today'
+                                : 'Expires in $days day${days == 1 ? '' : 's'}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            promoActive
+                                ? promoLabel
+                                : 'Suggested: $suggestedPromo or Buy 1 Take 1',
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                if (promoActive)
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _deactivatePromo(
+                        reference: document.reference,
+                        productName: productName,
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: const BorderSide(color: Colors.white),
+                      ),
+                      icon: const Icon(Icons.cancel_outlined),
+                      label: const Text('Remove Promo'),
+                    ),
+                  )
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () => _activateDiscount(
+                            reference: document.reference,
+                            discountPercent: suggestedDiscount,
+                            productName: productName,
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: const Color(0xFFE65100),
+                          ),
+                          child: Text('$suggestedDiscount% OFF'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () => _activateBuyOneTakeOne(
+                            reference: document.reference,
+                            productName: productName,
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1565C0),
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Text('B1 TAKE 1'),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+}
+
 class OwnerCustomerFeedbackScreen extends StatefulWidget {
   const OwnerCustomerFeedbackScreen({super.key});
 
@@ -1004,6 +1436,168 @@ class OwnerCustomerFeedbackScreen extends StatefulWidget {
 class _OwnerCustomerFeedbackScreenState
     extends State<OwnerCustomerFeedbackScreen> {
   String selectedStatus = 'All';
+
+  String _overallSatisfaction({
+    required int satisfied,
+    required int neutral,
+    required int dissatisfied,
+  }) {
+    if (satisfied == 0 && neutral == 0 && dissatisfied == 0) {
+      return 'No feedback yet';
+    }
+
+    if (satisfied >= neutral && satisfied >= dissatisfied) {
+      return 'Mostly Satisfied';
+    }
+
+    if (dissatisfied >= satisfied && dissatisfied >= neutral) {
+      return 'Mostly Dissatisfied';
+    }
+
+    return 'Mostly Neutral';
+  }
+
+  Color _overallSatisfactionColor(String result) {
+    switch (result) {
+      case 'Mostly Satisfied':
+        return Colors.green;
+      case 'Mostly Dissatisfied':
+        return Colors.red;
+      case 'Mostly Neutral':
+        return Colors.orange;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  Widget _feedbackSummaryCard({
+    required int total,
+    required int satisfied,
+    required int neutral,
+    required int dissatisfied,
+  }) {
+    final double satisfiedPercent = total == 0 ? 0 : (satisfied / total) * 100;
+    final double neutralPercent = total == 0 ? 0 : (neutral / total) * 100;
+    final double dissatisfiedPercent = total == 0
+        ? 0
+        : (dissatisfied / total) * 100;
+
+    final String overall = _overallSatisfaction(
+      satisfied: satisfied,
+      neutral: neutral,
+      dissatisfied: dissatisfied,
+    );
+
+    final Color overallColor = _overallSatisfactionColor(overall);
+
+    Widget summaryRow({
+      required String label,
+      required int count,
+      required double percent,
+      required Color color,
+      required IconData icon,
+    }) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 21),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            Text(
+              '$count (${percent.toStringAsFixed(0)}%)',
+              style: TextStyle(color: color, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Card(
+      elevation: 3,
+      margin: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: overallColor.withValues(alpha: 0.14),
+                  child: Icon(Icons.insights_outlined, color: overallColor),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Feedback Summary',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        overall,
+                        style: TextStyle(
+                          color: overallColor,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  '$total total',
+                  style: const TextStyle(
+                    color: Colors.grey,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            summaryRow(
+              label: 'Satisfied',
+              count: satisfied,
+              percent: satisfiedPercent,
+              color: Colors.green,
+              icon: Icons.sentiment_satisfied_alt,
+            ),
+            summaryRow(
+              label: 'Neutral',
+              count: neutral,
+              percent: neutralPercent,
+              color: Colors.orange,
+              icon: Icons.sentiment_neutral,
+            ),
+            summaryRow(
+              label: 'Dissatisfied',
+              count: dissatisfied,
+              percent: dissatisfiedPercent,
+              color: Colors.red,
+              icon: Icons.sentiment_dissatisfied,
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Ratings 4–5 are Satisfied, 3 is Neutral, and 1–2 are Dissatisfied.',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Future<void> _updateStatus(String documentId, String newStatus) async {
     try {
@@ -1140,6 +1734,23 @@ class _OwnerCustomerFeedbackScreenState
             return status.toLowerCase() == selectedStatus.toLowerCase();
           }).toList();
 
+          int satisfiedCount = 0;
+          int neutralCount = 0;
+          int dissatisfiedCount = 0;
+
+          for (final document in docs) {
+            final int rating =
+                (document.data()['rating'] as num?)?.toInt() ?? 0;
+
+            if (rating >= 4) {
+              satisfiedCount++;
+            } else if (rating == 3) {
+              neutralCount++;
+            } else if (rating > 0) {
+              dissatisfiedCount++;
+            }
+          }
+
           if (docs.isEmpty) {
             return const Center(
               child: Text(
@@ -1151,6 +1762,12 @@ class _OwnerCustomerFeedbackScreenState
 
           return Column(
             children: [
+              _feedbackSummaryCard(
+                total: docs.length,
+                satisfied: satisfiedCount,
+                neutral: neutralCount,
+                dissatisfied: dissatisfiedCount,
+              ),
               SingleChildScrollView(
                 padding: const EdgeInsets.all(14),
                 scrollDirection: Axis.horizontal,
@@ -1196,6 +1813,37 @@ class _OwnerCustomerFeedbackScreenState
                           final int rating =
                               (data['rating'] as num?)?.toInt() ?? 0;
 
+                          final String defaultImagePath;
+
+                          switch (type.toLowerCase()) {
+                            case 'service':
+                              defaultImagePath =
+                                  'assets/images/feedback/service_feedback.png';
+                              break;
+                            case 'product':
+                              defaultImagePath =
+                                  'assets/images/feedback/product_feedback.png';
+                              break;
+                            case 'suggestion':
+                              defaultImagePath =
+                                  'assets/images/feedback/suggestion_feedback.png';
+                              break;
+                            case 'complaint':
+                              defaultImagePath =
+                                  'assets/images/feedback/complaint_feedback.png';
+                              break;
+                            default:
+                              defaultImagePath =
+                                  'assets/images/feedback/other_feedback.png';
+                          }
+
+                          final String savedImagePath =
+                              (data['imagePath'] ?? '').toString().trim();
+
+                          final String imagePath = savedImagePath.isEmpty
+                              ? defaultImagePath
+                              : savedImagePath;
+
                           return Card(
                             elevation: 3,
                             margin: const EdgeInsets.only(bottom: 12),
@@ -1203,13 +1851,35 @@ class _OwnerCustomerFeedbackScreenState
                               borderRadius: BorderRadius.circular(16),
                             ),
                             child: ExpansionTile(
-                              leading: CircleAvatar(
-                                backgroundColor: Colors.amber.withValues(
-                                  alpha: 0.16,
+                              leading: Container(
+                                width: 54,
+                                height: 54,
+                                padding: const EdgeInsets.all(3),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Colors.grey.shade300,
+                                  ),
                                 ),
-                                child: const Icon(
-                                  Icons.star,
-                                  color: Colors.amber,
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(9),
+                                  child: Image.asset(
+                                    imagePath,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Container(
+                                        color: Colors.amber.withValues(
+                                          alpha: 0.16,
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: const Icon(
+                                          Icons.star,
+                                          color: Colors.amber,
+                                        ),
+                                      );
+                                    },
+                                  ),
                                 ),
                               ),
                               title: Text(
@@ -1249,6 +1919,42 @@ class _OwnerCustomerFeedbackScreenState
                               ),
                               children: [
                                 const Divider(),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: Image.asset(
+                                    imagePath,
+                                    width: double.infinity,
+                                    height: 180,
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Container(
+                                        width: double.infinity,
+                                        height: 150,
+                                        color: Colors.grey.shade100,
+                                        alignment: Alignment.center,
+                                        child: const Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              Icons
+                                                  .image_not_supported_outlined,
+                                              size: 50,
+                                              color: Colors.grey,
+                                            ),
+                                            SizedBox(height: 8),
+                                            Text(
+                                              'Feedback image unavailable',
+                                              style: TextStyle(
+                                                color: Colors.grey,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
                                 Row(
                                   children: List.generate(
                                     5,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -638,6 +640,8 @@ class CashierDashboard extends StatelessWidget {
                     'Process customer purchases quickly and accurately.',
                     style: TextStyle(color: Colors.grey),
                   ),
+                  const SizedBox(height: 18),
+                  const CashierAnimatedPromoBanner(),
                   const SizedBox(height: 22),
                   GridView.count(
                     shrinkWrap: true,
@@ -760,5 +764,261 @@ class CashierDashboard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class CashierAnimatedPromoBanner extends StatefulWidget {
+  const CashierAnimatedPromoBanner({super.key});
+
+  @override
+  State<CashierAnimatedPromoBanner> createState() =>
+      _CashierAnimatedPromoBannerState();
+}
+
+class _CashierAnimatedPromoBannerState
+    extends State<CashierAnimatedPromoBanner> {
+  int _currentIndex = 0;
+  Timer? _timer;
+
+  DateTime? _readDate(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value.trim());
+    return null;
+  }
+
+  int? _daysRemaining(dynamic value) {
+    final expiration = _readDate(value);
+    if (expiration == null) return null;
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final expiry = DateTime(expiration.year, expiration.month, expiration.day);
+    return expiry.difference(today).inDays;
+  }
+
+  void _ensureTimer(int itemCount) {
+    if (itemCount <= 1) {
+      _timer?.cancel();
+      _timer = null;
+      return;
+    }
+
+    if (_timer != null) return;
+
+    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      setState(() {
+        _currentIndex = (_currentIndex + 1) % itemCount;
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('products').snapshots(),
+      builder: (context, snapshot) {
+        final docs = snapshot.data?.docs ?? [];
+
+        final activePromos = docs.where((document) {
+          final data = document.data();
+          final stock = (data['stock'] as num?)?.toInt() ?? 0;
+          return data['promoActive'] == true && stock > 0;
+        }).toList();
+
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const SizedBox(
+            height: 165,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (activePromos.isEmpty) {
+          _timer?.cancel();
+          _timer = null;
+
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE3F2FD),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFF90CAF9)),
+            ),
+            child: const Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: Colors.white,
+                  child: Icon(
+                    Icons.local_offer_outlined,
+                    color: Color(0xFF1565C0),
+                  ),
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'No active promos yet. Promo offers created by the owner will appear here.',
+                    style: TextStyle(
+                      color: Color(0xFF0D47A1),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (_currentIndex >= activePromos.length) {
+          _currentIndex = 0;
+        }
+
+        _ensureTimer(activePromos.length);
+
+        final document = activePromos[_currentIndex];
+        final data = document.data();
+
+        final productName = (data['productName'] ?? 'Unknown Product')
+            .toString();
+        final imagePath =
+            (data['imagePath'] ?? 'assets/images/products/default_product.png')
+                .toString();
+        final promoLabel = (data['promoLabel'] ?? 'SPECIAL PROMO').toString();
+        final days = _daysRemaining(data['expirationDate']);
+
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 650),
+          transitionBuilder: (child, animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.96, end: 1).animate(animation),
+                child: child,
+              ),
+            );
+          },
+          child: Container(
+            key: ValueKey(document.id),
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF0D47A1), Color(0xFF1976D2)],
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.blue.withValues(alpha: 0.22),
+                  blurRadius: 12,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 88,
+                  height: 88,
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(11),
+                    child: Image.asset(
+                      imagePath,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) {
+                        return const Icon(
+                          Icons.inventory_2_outlined,
+                          size: 45,
+                          color: Colors.grey,
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.campaign, color: Colors.amber, size: 20),
+                          SizedBox(width: 6),
+                          Text(
+                            'ACTIVE PROMO',
+                            style: TextStyle(
+                              color: Colors.amber,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 7),
+                      Text(
+                        productName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 19,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          promoLabel,
+                          style: const TextStyle(
+                            color: Color(0xFF1565C0),
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      if (days != null && days >= 0) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          days == 0
+                              ? 'Expires today'
+                              : 'Expires in $days day${days == 1 ? '' : 's'}',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                Text(
+                  '${_currentIndex + 1}/${activePromos.length}',
+                  style: const TextStyle(color: Colors.white70),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 }

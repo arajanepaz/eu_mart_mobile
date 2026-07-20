@@ -47,6 +47,10 @@ flutter:
     - assets/images/eu_mart_logo.png
     - assets/images/grocery_overlay.png.png
     - assets/images/EUMART_Logo.png
+    - assets/images/products/
+    - assets/images/feedback/
+ 
+    
     
 
 flutter_launcher_icons:

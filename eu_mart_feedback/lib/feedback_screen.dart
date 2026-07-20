@@ -20,6 +20,16 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   int _rating = 0;
   bool _submitting = false;
 
+  String _selectedImagePath = 'assets/images/feedback/service_feedback.png';
+
+  final Map<String, String> _feedbackImages = {
+    'Service Feedback': 'assets/images/feedback/service_feedback.png',
+    'Product Feedback': 'assets/images/feedback/product_feedback.png',
+    'Suggestion': 'assets/images/feedback/suggestion_feedback.png',
+    'Complaint': 'assets/images/feedback/complaint_feedback.png',
+    'Other Feedback': 'assets/images/feedback/other_feedback.png',
+  };
+
   Future<void> _submitFeedback() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -45,6 +55,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
         'feedbackType': _feedbackType,
         'rating': _rating,
         'message': _messageController.text.trim(),
+        'imagePath': _selectedImagePath,
         'status': 'Pending',
         'source': 'Receipt QR Code',
         'createdAt': FieldValue.serverTimestamp(),
@@ -92,6 +103,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
       setState(() {
         _feedbackType = 'Service';
         _rating = 0;
+        _selectedImagePath = 'assets/images/feedback/service_feedback.png';
       });
     } catch (error) {
       if (!mounted) return;
@@ -275,6 +287,74 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                                   _feedbackType = value ?? 'Service';
                                 });
                               },
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Feedback Image',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 10),
+
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedImagePath,
+                        decoration: const InputDecoration(
+                          labelText: 'Select an image',
+                          prefixIcon: Icon(Icons.image_outlined),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _feedbackImages.entries.map((entry) {
+                          return DropdownMenuItem<String>(
+                            value: entry.value,
+                            child: Text(entry.key),
+                          );
+                        }).toList(),
+                        onChanged: _submitting
+                            ? null
+                            : (value) {
+                                if (value == null) return;
+
+                                setState(() {
+                                  _selectedImagePath = value;
+                                });
+                              },
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      Container(
+                        width: double.infinity,
+                        height: 190,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.asset(
+                            _selectedImagePath,
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) {
+                              return const Center(
+                                child: Icon(
+                                  Icons.image_not_supported_outlined,
+                                  size: 70,
+                                  color: Colors.grey,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
                       ),
 
                       const SizedBox(height: 16),

@@ -15,12 +15,29 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 
   bool hasScanned = false;
 
+  String? _candidateBarcode;
+  int _matchingDetections = 0;
+  DateTime? _candidateFirstSeen;
+  DateTime? _lastDetectionTime;
+
+  String _scanStatus = 'Align the product barcode inside the box.';
+  Color _statusColor = Colors.white;
+
+  static const Duration _cameraWarmUp = Duration(milliseconds: 700);
+  static const Duration _requiredStableTime = Duration(milliseconds: 900);
+  static const Duration _maximumDetectionGap = Duration(milliseconds: 500);
+  static const int _requiredMatchingDetections = 4;
+
+  late final DateTime _scannerReadyAt;
+
   @override
   void initState() {
     super.initState();
 
+    _scannerReadyAt = DateTime.now().add(_cameraWarmUp);
+
     controller = MobileScannerController(
-      detectionSpeed: DetectionSpeed.noDuplicates,
+      detectionSpeed: DetectionSpeed.normal,
       facing: CameraFacing.back,
       torchEnabled: false,
       formats: const [
@@ -36,27 +53,107 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     );
   }
 
-  void handleBarcode(BarcodeCapture capture) {
-    if (hasScanned || capture.barcodes.isEmpty) return;
-
-    String? barcodeValue;
-
+  String? _extractBarcode(BarcodeCapture capture) {
     for (final barcode in capture.barcodes) {
       final value = barcode.rawValue?.trim();
 
       if (value != null && value.isNotEmpty) {
-        barcodeValue = value;
-        break;
+        return value;
       }
     }
 
+    return null;
+  }
+
+  void _resetCandidate({
+    String status = 'Align the product barcode inside the box.',
+  }) {
+    _candidateBarcode = null;
+    _matchingDetections = 0;
+    _candidateFirstSeen = null;
+    _lastDetectionTime = null;
+
+    if (!mounted || hasScanned) return;
+
+    setState(() {
+      _scanStatus = status;
+      _statusColor = Colors.white;
+    });
+  }
+
+  void handleBarcode(BarcodeCapture capture) {
+    if (hasScanned || capture.barcodes.isEmpty) return;
+
+    final now = DateTime.now();
+
+    if (now.isBefore(_scannerReadyAt)) {
+      if (mounted && _scanStatus != 'Preparing camera...') {
+        setState(() {
+          _scanStatus = 'Preparing camera...';
+          _statusColor = Colors.white70;
+        });
+      }
+      return;
+    }
+
+    final barcodeValue = _extractBarcode(capture);
     if (barcodeValue == null) return;
+
+    final bool detectionGapTooLong =
+        _lastDetectionTime != null &&
+        now.difference(_lastDetectionTime!) > _maximumDetectionGap;
+
+    if (_candidateBarcode != barcodeValue || detectionGapTooLong) {
+      _candidateBarcode = barcodeValue;
+      _matchingDetections = 1;
+      _candidateFirstSeen = now;
+      _lastDetectionTime = now;
+
+      if (mounted) {
+        setState(() {
+          _scanStatus = 'Barcode detected. Hold steady...';
+          _statusColor = Colors.amber;
+        });
+      }
+      return;
+    }
+
+    _matchingDetections++;
+    _lastDetectionTime = now;
+
+    final stableDuration = now.difference(_candidateFirstSeen!);
+    final progress =
+        (stableDuration.inMilliseconds / _requiredStableTime.inMilliseconds)
+            .clamp(0.0, 1.0);
+
+    if (mounted) {
+      setState(() {
+        _scanStatus = 'Hold steady... ${(progress * 100).toStringAsFixed(0)}%';
+        _statusColor = Colors.amber;
+      });
+    }
+
+    final bool enoughDetections =
+        _matchingDetections >= _requiredMatchingDetections;
+    final bool stableLongEnough = stableDuration >= _requiredStableTime;
+
+    if (!enoughDetections || !stableLongEnough) return;
 
     hasScanned = true;
 
-    if (!mounted) return;
+    if (mounted) {
+      setState(() {
+        _scanStatus = 'Barcode confirmed!';
+        _statusColor = Colors.greenAccent;
+      });
+    }
 
-    Navigator.of(context).pop(barcodeValue);
+    unawaited(controller.stop());
+
+    Future<void>.delayed(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      Navigator.of(context).pop(barcodeValue);
+    });
   }
 
   Future<void> toggleFlash() async {
@@ -73,6 +170,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 
   Future<void> switchCamera() async {
     try {
+      _resetCandidate(status: 'Refocusing camera...');
       await controller.switchCamera();
     } catch (error) {
       if (!mounted) return;
@@ -177,12 +275,15 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
             fit: BoxFit.cover,
             tapToFocus: true,
           ),
-
           IgnorePointer(
             child: Container(
               decoration: ShapeDecoration(
                 shape: BarcodeScannerOverlayShape(
-                  borderColor: Colors.green,
+                  borderColor: hasScanned
+                      ? Colors.greenAccent
+                      : _candidateBarcode != null
+                      ? Colors.amber
+                      : Colors.green,
                   borderRadius: 12,
                   borderLength: 35,
                   borderWidth: 4,
@@ -191,19 +292,50 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
               ),
             ),
           ),
-
-          const Positioned(
+          Positioned(
             left: 25,
             right: 25,
             bottom: 70,
-            child: Text(
-              'Align the product barcode inside the box.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                shadows: [Shadow(color: Colors.black, blurRadius: 8)],
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 250),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.62),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _statusColor.withValues(alpha: 0.75)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (!hasScanned && _candidateBarcode != null) ...[
+                    SizedBox(
+                      width: 17,
+                      height: 17,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: _statusColor,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                  ] else if (hasScanned) ...[
+                    Icon(Icons.check_circle, color: _statusColor, size: 20),
+                    const SizedBox(width: 8),
+                  ],
+                  Flexible(
+                    child: Text(
+                      _scanStatus,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _statusColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        shadows: const [
+                          Shadow(color: Colors.black, blurRadius: 8),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -213,9 +345,9 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   }
 
   @override
-  Future<void> dispose() async {
+  void dispose() {
+    unawaited(controller.dispose());
     super.dispose();
-    await controller.dispose();
   }
 }
 

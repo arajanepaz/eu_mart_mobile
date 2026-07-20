@@ -566,6 +566,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       final String supplier = (data['supplier'] ?? '')
                           .toString();
 
+                      final String imagePath =
+                          (data['imagePath'] ??
+                                  'assets/images/products/default_product.png')
+                              .toString();
+
                       final double buyingPrice =
                           (data['buyingPrice'] as num?)?.toDouble() ?? 0;
 
@@ -612,12 +617,35 @@ class _InventoryScreenState extends State<InventoryScreen> {
                               Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  CircleAvatar(
-                                    radius: 24,
-                                    backgroundColor: Colors.blue.shade100,
-                                    child: const Icon(
-                                      Icons.inventory_2,
-                                      color: Colors.blue,
+                                  Container(
+                                    width: 72,
+                                    height: 72,
+                                    padding: const EdgeInsets.all(5),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: Colors.grey.shade300,
+                                      ),
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.asset(
+                                        imagePath,
+                                        fit: BoxFit.contain,
+                                        errorBuilder:
+                                            (context, error, stackTrace) {
+                                              return Container(
+                                                color: Colors.blue.shade50,
+                                                alignment: Alignment.center,
+                                                child: const Icon(
+                                                  Icons.inventory_2_outlined,
+                                                  color: Colors.blue,
+                                                  size: 36,
+                                                ),
+                                              );
+                                            },
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(width: 12),
