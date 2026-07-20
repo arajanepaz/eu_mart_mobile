@@ -78,30 +78,64 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
   void addToCart({
     required String id,
     required String productName,
-    required double price,
+    required double originalPrice,
     required int stock,
+    required String imagePath,
+    required bool promoActive,
+    required String promoType,
+    required String promoLabel,
+    required double discountPercent,
+    required int buyQuantity,
+    required int freeQuantity,
   }) {
     final index = cart.indexWhere((item) => item.id == id);
 
+    if (stock <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This product is out of stock.')),
+      );
+      return;
+    }
+
     if (index == -1) {
-      if (stock <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('This product is out of stock.')),
-        );
-        return;
-      }
-      setState(() {
-        cart.add(CartItem(id: id, productName: productName, price: price));
-      });
-    } else {
-      if (cart[index].quantity >= stock) {
+      final newItem = CartItem(
+        id: id,
+        productName: productName,
+        originalPrice: originalPrice,
+        availableStock: stock,
+        imagePath: imagePath,
+        promoActive: promoActive,
+        promoType: promoType,
+        promoLabel: promoLabel,
+        discountPercent: discountPercent,
+        buyQuantity: buyQuantity,
+        freeQuantity: freeQuantity,
+      );
+
+      if (newItem.totalStockQuantity > stock) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Only $stock stock available for $productName.'),
+            content: Text(
+              'Not enough stock to apply the promo for $productName.',
+            ),
           ),
         );
         return;
       }
+
+      setState(() => cart.add(newItem));
+    } else {
+      if (!cart[index].canIncrease) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Only ${cart[index].availableStock} stock available for $productName, including free promo items.',
+            ),
+          ),
+        );
+        return;
+      }
+
       setState(() => cart[index].quantity++);
     }
 
@@ -151,8 +185,15 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
       addToCart(
         id: product.id,
         productName: (data['productName'] ?? 'Unknown Product').toString(),
-        price: (data['sellingPrice'] as num?)?.toDouble() ?? 0,
+        originalPrice: (data['sellingPrice'] as num?)?.toDouble() ?? 0,
         stock: (data['stock'] as num?)?.toInt() ?? 0,
+        imagePath: (data['imagePath'] ?? '').toString(),
+        promoActive: data['promoActive'] == true,
+        promoType: (data['promoType'] ?? '').toString(),
+        promoLabel: (data['promoLabel'] ?? '').toString(),
+        discountPercent: (data['discountPercent'] as num?)?.toDouble() ?? 0,
+        buyQuantity: (data['buyQuantity'] as num?)?.toInt() ?? 1,
+        freeQuantity: (data['freeQuantity'] as num?)?.toInt() ?? 0,
       );
     } catch (error) {
       if (!mounted) return;
@@ -167,6 +208,18 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
 
   void increaseQty(int index) {
     if (index < 0 || index >= cart.length) return;
+
+    if (!cart[index].canIncrease) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Only ${cart[index].availableStock} stock available, including free promo items.',
+          ),
+        ),
+      );
+      return;
+    }
+
     setState(() => cart[index].quantity++);
   }
 
@@ -199,24 +252,14 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
     try {
       setState(() => isProcessing = true);
 
-      final receiptItems = cart
-          .map(
-            (item) => CartItem(
-              id: item.id,
-              productName: item.productName,
-              price: item.price,
-              quantity: item.quantity,
-            ),
-          )
-          .toList();
+      final receiptItems = cart.map((item) => item.copyWith()).toList();
 
       final receiptTotal = total;
       final receiptCash = cash;
       final receiptChange = change;
       final transactionDate = DateTime.now();
-      final transactionId = transactionDate.millisecondsSinceEpoch.toString();
 
-      await TransactionService().saveTransaction(
+      final receiptNumber = await TransactionService().saveTransaction(
         cart: cart,
         total: receiptTotal,
         cash: receiptCash,
@@ -242,7 +285,7 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
             total: receiptTotal,
             cash: receiptCash,
             change: receiptChange,
-            transactionId: transactionId,
+            transactionId: receiptNumber,
             transactionDate: transactionDate,
           ),
         ),
@@ -317,8 +360,25 @@ class _NewTransactionScreenState extends State<NewTransactionScreen> {
                                                 '₱${item.subtotal.toStringAsFixed(2)}',
                                                 style: const TextStyle(
                                                   color: Colors.green,
+                                                  fontWeight: FontWeight.w600,
                                                 ),
                                               ),
+                                              if (item.promoActive &&
+                                                  item
+                                                      .promoLabel
+                                                      .isNotEmpty) ...[
+                                                const SizedBox(height: 3),
+                                                Text(
+                                                  item.promoFreeUnits > 0
+                                                      ? '${item.promoLabel} • ${item.promoFreeUnits} free'
+                                                      : '${item.promoLabel} • ₱${item.effectiveUnitPrice.toStringAsFixed(2)} each',
+                                                  style: const TextStyle(
+                                                    color: Colors.orange,
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ],
                                             ],
                                           ),
                                         ),
@@ -593,9 +653,15 @@ $catalog
       barcode: (data['barcode'] ?? '').toString(),
       brand: (data['brand'] ?? '').toString(),
       category: (data['category'] ?? '').toString(),
-      imageUrl: (data['imageUrl'] ?? '').toString(),
+      imagePath: (data['imagePath'] ?? '').toString(),
       sellingPrice: (data['sellingPrice'] as num?)?.toDouble() ?? 0,
       stock: (data['stock'] as num?)?.toInt() ?? 0,
+      promoActive: data['promoActive'] == true,
+      promoType: (data['promoType'] ?? '').toString(),
+      promoLabel: (data['promoLabel'] ?? '').toString(),
+      discountPercent: (data['discountPercent'] as num?)?.toDouble() ?? 0,
+      buyQuantity: (data['buyQuantity'] as num?)?.toInt() ?? 1,
+      freeQuantity: (data['freeQuantity'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -830,18 +896,19 @@ $catalog
   }
 
   Widget _buildProductImage(_ProductData product) {
-    if (product.imageUrl.trim().isNotEmpty) {
+    if (product.imagePath.trim().isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(12),
-        child: Image.network(
-          product.imageUrl,
+        child: Image.asset(
+          product.imagePath,
           width: 62,
           height: 62,
-          fit: BoxFit.cover,
+          fit: BoxFit.contain,
           errorBuilder: (_, __, ___) => _buildImagePlaceholder(),
         ),
       );
     }
+
     return _buildImagePlaceholder();
   }
 
@@ -928,6 +995,19 @@ $catalog
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                  if (product.promoActive && product.promoLabel.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      product.promoType == 'percentage'
+                          ? '${product.promoLabel} • Now ₱${product.effectivePrice.toStringAsFixed(2)}'
+                          : product.promoLabel,
+                      style: const TextStyle(
+                        color: Colors.orange,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                   if (product.brand.isNotEmpty ||
                       product.category.isNotEmpty) ...[
                     const SizedBox(height: 4),
@@ -959,8 +1039,15 @@ $catalog
                         addToCart(
                           id: product.id,
                           productName: product.productName,
-                          price: product.sellingPrice,
+                          originalPrice: product.sellingPrice,
                           stock: product.stock,
+                          imagePath: product.imagePath,
+                          promoActive: product.promoActive,
+                          promoType: product.promoType,
+                          promoLabel: product.promoLabel,
+                          discountPercent: product.discountPercent,
+                          buyQuantity: product.buyQuantity,
+                          freeQuantity: product.freeQuantity,
                         );
                       }
                     : null,
@@ -994,8 +1081,15 @@ $catalog
                   addToCart(
                     id: product.id,
                     productName: product.productName,
-                    price: product.sellingPrice,
+                    originalPrice: product.sellingPrice,
                     stock: product.stock,
+                    imagePath: product.imagePath,
+                    promoActive: product.promoActive,
+                    promoType: product.promoType,
+                    promoLabel: product.promoLabel,
+                    discountPercent: product.discountPercent,
+                    buyQuantity: product.buyQuantity,
+                    freeQuantity: product.freeQuantity,
                   );
                 }
               : null,
@@ -1248,9 +1342,15 @@ class _ProductData {
     required this.barcode,
     required this.brand,
     required this.category,
-    required this.imageUrl,
+    required this.imagePath,
     required this.sellingPrice,
     required this.stock,
+    required this.promoActive,
+    required this.promoType,
+    required this.promoLabel,
+    required this.discountPercent,
+    required this.buyQuantity,
+    required this.freeQuantity,
   });
 
   final String id;
@@ -1258,9 +1358,24 @@ class _ProductData {
   final String barcode;
   final String brand;
   final String category;
-  final String imageUrl;
+  final String imagePath;
   final double sellingPrice;
   final int stock;
+  final bool promoActive;
+  final String promoType;
+  final String promoLabel;
+  final double discountPercent;
+  final int buyQuantity;
+  final int freeQuantity;
+
+  double get effectivePrice {
+    if (!promoActive || promoType != 'percentage') {
+      return sellingPrice;
+    }
+
+    final safeDiscount = discountPercent.clamp(0, 100);
+    return sellingPrice * (1 - safeDiscount / 100);
+  }
 }
 
 class _ProductSearchResult {

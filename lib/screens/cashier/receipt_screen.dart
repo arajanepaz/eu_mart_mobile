@@ -25,15 +25,7 @@ class ReceiptScreen extends StatelessWidget {
     required this.transactionDate,
   });
 
-  String get receiptNumber {
-    final year = transactionDate.year;
-
-    final shortId = transactionId.length > 6
-        ? transactionId.substring(transactionId.length - 6)
-        : transactionId;
-
-    return 'EU-$year-$shortId';
-  }
+  String get receiptNumber => transactionId;
 
   Future<Uint8List> generatePdf() async {
     final logoBytes = await rootBundle.load('assets/images/eu_mart_logo.png');
@@ -126,9 +118,19 @@ class ReceiptScreen extends StatelessWidget {
                   ...cart.map(
                     (item) => pw.TableRow(
                       children: [
-                        receiptCell(item.productName),
-                        receiptCell('${item.quantity}'),
-                        receiptCell('P${item.price.toStringAsFixed(2)}'),
+                        receiptCell(
+                          item.promoFreeUnits > 0
+                              ? '${item.productName} (${item.promoLabel})'
+                              : item.productName,
+                        ),
+                        receiptCell(
+                          item.promoFreeUnits > 0
+                              ? '${item.quantity} + ${item.promoFreeUnits} free'
+                              : '${item.quantity}',
+                        ),
+                        receiptCell(
+                          'P${item.effectiveUnitPrice.toStringAsFixed(2)}',
+                        ),
                         receiptCell('P${item.subtotal.toStringAsFixed(2)}'),
                       ],
                     ),
@@ -375,9 +377,23 @@ class ReceiptScreen extends StatelessWidget {
                                 const SizedBox(height: 3),
 
                                 Text(
-                                  '${item.quantity} × ₱${item.price.toStringAsFixed(2)}',
+                                  '${item.quantity} × ₱${item.effectiveUnitPrice.toStringAsFixed(2)}',
                                   style: const TextStyle(color: Colors.grey),
                                 ),
+                                if (item.promoActive &&
+                                    item.promoLabel.isNotEmpty) ...[
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    item.promoFreeUnits > 0
+                                        ? '${item.promoLabel} • ${item.promoFreeUnits} free item(s)'
+                                        : item.promoLabel,
+                                    style: const TextStyle(
+                                      color: Colors.orange,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),

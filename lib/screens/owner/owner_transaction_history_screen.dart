@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../services/transaction_service.dart';
+
 class OwnerTransactionHistoryScreen extends StatefulWidget {
   const OwnerTransactionHistoryScreen({super.key});
 
@@ -89,11 +91,13 @@ class _OwnerTransactionHistoryScreenState
     return null;
   }
 
-  Future<void> _confirmDeleteTransaction({
+  Future<void> _confirmVoidTransaction({
     required String documentId,
     required String receiptNumber,
   }) async {
-    final bool? confirmed = await showDialog<bool>(
+    final reasonController = TextEditingController();
+
+    final String? reason = await showDialog<String>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
@@ -103,18 +107,31 @@ class _OwnerTransactionHistoryScreenState
           ),
           title: const Row(
             children: [
-              Icon(Icons.warning_amber_rounded, color: Colors.red),
+              Icon(Icons.block, color: Colors.red),
               SizedBox(width: 10),
-              Expanded(child: Text('Delete Transaction')),
+              Expanded(child: Text('Void Transaction')),
             ],
           ),
-          content: Text(
-            'Are you sure you want to delete transaction "$receiptNumber"?\n\n'
-            'This action cannot be undone.',
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Void transaction "$receiptNumber"? The product stock will be restored.',
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: reasonController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Reason for voiding',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Cancel'),
             ),
             ElevatedButton.icon(
@@ -122,28 +139,34 @@ class _OwnerTransactionHistoryScreenState
                 backgroundColor: Colors.red,
                 foregroundColor: Colors.white,
               ),
-              onPressed: () => Navigator.pop(dialogContext, true),
-              icon: const Icon(Icons.delete),
-              label: const Text('Delete'),
+              onPressed: () {
+                final value = reasonController.text.trim();
+                if (value.isEmpty) return;
+                Navigator.pop(dialogContext, value);
+              },
+              icon: const Icon(Icons.block),
+              label: const Text('Void'),
             ),
           ],
         );
       },
     );
 
-    if (confirmed != true) return;
+    reasonController.dispose();
+
+    if (reason == null || reason.isEmpty) return;
 
     try {
-      await FirebaseFirestore.instance
-          .collection('transactions')
-          .doc(documentId)
-          .delete();
+      await TransactionService().voidTransaction(
+        transactionId: documentId,
+        reason: reason,
+      );
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Transaction deleted successfully.'),
+          content: Text('Transaction voided and product stock restored.'),
           backgroundColor: Colors.green,
         ),
       );
@@ -152,7 +175,7 @@ class _OwnerTransactionHistoryScreenState
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Unable to delete transaction: $error'),
+          content: Text('Unable to void transaction: $error'),
           backgroundColor: Colors.red,
         ),
       );
@@ -298,7 +321,13 @@ class _OwnerTransactionHistoryScreenState
 
           double totalSales = 0;
           for (final doc in filteredDocs) {
-            totalSales += (doc.data()['total'] as num?)?.toDouble() ?? 0;
+            final status = (doc.data()['status'] ?? 'completed')
+                .toString()
+                .toLowerCase();
+
+            if (status != 'voided') {
+              totalSales += (doc.data()['total'] as num?)?.toDouble() ?? 0;
+            }
           }
 
           return Column(
@@ -412,6 +441,11 @@ class _OwnerTransactionHistoryScreenState
                               (data['change'] as num?)?.toDouble() ?? 0;
                           final createdAt = _readDate(data['createdAt']);
                           final bool isNew = data['isViewedByOwner'] != true;
+                          final String transactionStatus =
+                              (data['status'] ?? 'completed')
+                                  .toString()
+                                  .toLowerCase();
+                          final bool isVoided = transactionStatus == 'voided';
 
                           final dateText = createdAt == null
                               ? 'Date unavailable'
@@ -440,6 +474,7 @@ class _OwnerTransactionHistoryScreenState
 
                           return Card(
                             elevation: 3,
+                            color: isVoided ? Colors.red.shade50 : Colors.white,
                             margin: const EdgeInsets.only(bottom: 12),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
@@ -473,10 +508,14 @@ class _OwnerTransactionHistoryScreenState
                                     ),
                                   ),
                                   Text(
-                                    '₱${total.toStringAsFixed(2)}',
-                                    style: const TextStyle(
+                                    isVoided
+                                        ? 'VOIDED'
+                                        : '₱${total.toStringAsFixed(2)}',
+                                    style: TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.green,
+                                      color: isVoided
+                                          ? Colors.red
+                                          : Colors.green,
                                     ),
                                   ),
                                 ],
@@ -548,18 +587,20 @@ class _OwnerTransactionHistoryScreenState
                                 Align(
                                   alignment: Alignment.centerRight,
                                   child: TextButton.icon(
-                                    onPressed: () {
-                                      _confirmDeleteTransaction(
-                                        documentId: document.id,
-                                        receiptNumber: receiptNumber,
-                                      );
-                                    },
+                                    onPressed: isVoided
+                                        ? null
+                                        : () {
+                                            _confirmVoidTransaction(
+                                              documentId: document.id,
+                                              receiptNumber: receiptNumber,
+                                            );
+                                          },
                                     icon: const Icon(
-                                      Icons.delete_outline,
+                                      Icons.block,
                                       color: Colors.red,
                                     ),
                                     label: const Text(
-                                      'Delete Transaction',
+                                      'Void Transaction',
                                       style: TextStyle(color: Colors.red),
                                     ),
                                   ),
